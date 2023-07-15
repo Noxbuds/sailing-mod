@@ -2,22 +2,31 @@ package com.noxbuds.sailing.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.noxbuds.sailing.SailingMod;
 import com.noxbuds.sailing.boat.EntityBoat;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.RedStoneOreBlock;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.joml.*;
 import org.joml.Math;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Set;
 
 public class BoatRenderer extends EntityRenderer {
     protected BoatRenderer(EntityRendererProvider.Context context) {
@@ -36,15 +45,21 @@ public class BoatRenderer extends EntityRenderer {
         VertexConsumer consumer = bufferSource.getBuffer(RenderType.entityCutoutNoCull(new ResourceLocation("minecraft", "textures/block/stone.png")));
 
         EntityBoat boat = (EntityBoat)entity;
-        HashSet<BlockPos> positions = boat.getBlockPositions();
+        HashMap<BlockPos, BlockState> blocks = boat.getBlockPositions();
         Vector3f minPos = boat.getMinPosition();
 
-        for (BlockPos blockPos : positions) {
+        BlockRenderDispatcher blockRenderer = Minecraft.getInstance().getBlockRenderer();
+
+        for (BlockPos blockPos : blocks.keySet()) {
+            poseStack.pushPose();
             Vector3f position = blockPos.getCenter()
                 .toVector3f()
                 .add(minPos);
 
-            renderCube(position, consumer, poseStack, light);
+            poseStack.translate(position.x, position.y, position.z);
+
+            blockRenderer.renderSingleBlock(blocks.get(blockPos), poseStack, bufferSource, light, OverlayTexture.NO_OVERLAY);
+            poseStack.popPose();
         }
 
         poseStack.popPose();

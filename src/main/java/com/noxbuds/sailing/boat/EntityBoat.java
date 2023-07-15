@@ -5,8 +5,10 @@ import com.noxbuds.sailing.network.BoatBlockMessage;
 import com.noxbuds.sailing.network.BoatRequestMessage;
 import com.noxbuds.sailing.network.SailingNetworking;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderGetter;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -16,30 +18,31 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.entity.IEntityAdditionalSpawnData;
 import net.minecraftforge.network.NetworkHooks;
 import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.joml.Vector3f;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Set;
 
 public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private static final EntityDataAccessor<Vector3f> MIN_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Vector3f> MAX_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
 
-    private HashSet<BlockPos> blockPositions;
-
-    private Vec3 centreOfMass;
+    private HashMap<BlockPos, BlockState> blockPositions;
 
     public EntityBoat(EntityType<? extends EntityBoat> type, Level level) {
         super(type, level);
-        this.blockPositions = new HashSet<>();
+        this.blockPositions = new HashMap<>();
     }
 
-    private Vec3 calculateCentreOfMass(ArrayList<BlockPos> positions) {
+    private Vec3 calculateCentreOfMass(Set<BlockPos> positions) {
         //TODO: calculate mass of blocks and use it to weight position
         Vec3 centre = Vec3.ZERO;
 
@@ -51,14 +54,15 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         return centre;
     }
 
-    public void setBlocks(ArrayList<BlockPos> positions) {
-        this.centreOfMass = calculateCentreOfMass(positions);
+    public void setBlocks(HashMap<BlockPos, BlockState> blocks) {
+        Vec3 centreOfMass = calculateCentreOfMass(blocks.keySet());
+        this.setPos(centreOfMass);
 
         int minX = Integer.MAX_VALUE;
         int minY = Integer.MAX_VALUE;
         int minZ = Integer.MAX_VALUE;
 
-        for (BlockPos pos : positions) {
+        for (BlockPos pos : blocks.keySet()) {
             if (pos.getX() < minX)
                 minX = pos.getX();
 
@@ -70,30 +74,32 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         }
 
         Vector3f minPos = new Vector3f(minX, minY, minZ);
-        minPos = minPos.sub(this.centreOfMass.toVector3f());
+        minPos = minPos.sub(centreOfMass.toVector3f());
+        minPos = minPos.sub(new Vector3f(0.5f));
 
         this.entityData.set(MIN_POS, minPos);
 
-        for (BlockPos position : positions) {
-            this.blockPositions.add(position.subtract(new Vec3i(minX, minY, minZ)));
+        for (BlockPos position : blocks.keySet()) {
+            Vec3i newPos = position.subtract(new Vec3i(minX, minY, minZ));
+            this.blockPositions.put(new BlockPos(newPos), blocks.get(position));
         }
     }
 
     // Called from the server to sync the ship data with clients
     public void syncData() {
-        for (BlockPos pos : this.blockPositions) {
-            BoatBlockMessage message = new BoatBlockMessage(this.getId(), pos);
+        for (BlockPos pos : this.blockPositions.keySet()) {
+            BoatBlockMessage message = new BoatBlockMessage(this.getId(), pos, this.blockPositions.get(pos));
             SailingMod.CHANNEL.send(PacketDistributor.ALL.noArg(), message);
         }
     }
 
     // This is called by the packet handler when a block packet is received on the client
-    public void updateBlock(BlockPos position) {
-        this.blockPositions.add(position);
+    public void updateBlock(BlockPos position, BlockState state) {
+        this.blockPositions.put(position, state);
     }
 
 
-    public HashSet<BlockPos> getBlockPositions() {
+    public HashMap<BlockPos, BlockState> getBlockPositions() {
         return this.blockPositions;
     }
 
@@ -109,11 +115,12 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     @Override
     protected void readAdditionalSaveData(CompoundTag nbt) {
         float minX = nbt.getFloat("minX");
-        float minY = nbt.getFloat("minX");
-        float minZ = nbt.getFloat("minX");
+        float minY = nbt.getFloat("minY");
+        float minZ = nbt.getFloat("minZ");
         this.entityData.set(MIN_POS, new Vector3f(minX, minY, minZ));
 
-        this.blockPositions = new HashSet<>();
+        this.blockPositions = new HashMap<>();
+
         byte[] bytes = nbt.getByteArray("blockPositions");
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
 
@@ -122,26 +129,38 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             int y = buffer.getInt();
             int z = buffer.getInt();
 
-            this.blockPositions.add(new BlockPos(x, y, z));
+            BlockPos position = new BlockPos(x, y, z);
+
+            CompoundTag stateNbt = nbt.getCompound(position.toShortString());
+            HolderGetter<Block> holder = level().holderLookup(ForgeRegistries.BLOCKS.getRegistryKey());
+            BlockState state = NbtUtils.readBlockState(holder, stateNbt);
+
+            this.blockPositions.put(position, state);
         }
     }
 
     @Override
     protected void addAdditionalSaveData(CompoundTag nbt) {
         Vector3f minPos = getMinPosition();
+        System.out.println("Writing min position: " + minPos);
         nbt.putFloat("minX", minPos.x);
         nbt.putFloat("minY", minPos.y);
         nbt.putFloat("minZ", minPos.z);
 
         ByteBuffer buffer = ByteBuffer.allocate(this.blockPositions.size() * 12);
 
-        for (BlockPos pos : this.blockPositions) {
+        for (BlockPos pos : this.blockPositions.keySet()) {
             buffer.putInt(pos.getX());
             buffer.putInt(pos.getY());
             buffer.putInt(pos.getZ());
         }
 
         nbt.putByteArray("blockPositions", buffer.array());
+
+        for (BlockPos pos : this.blockPositions.keySet()) {
+            CompoundTag stateNbt = NbtUtils.writeBlockState(this.blockPositions.get(pos));
+            nbt.put(pos.toShortString(), stateNbt);
+        }
     }
 
     // The following code is a bit naff, but this is the only way I found to sync entity IDs and then send a request
