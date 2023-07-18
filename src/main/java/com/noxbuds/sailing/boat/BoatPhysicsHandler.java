@@ -14,6 +14,7 @@ import java.util.HashMap;
 public class BoatPhysicsHandler {
     private final Vec3 gravity = new Vec3(0, -9.8, 0);
     private final EntityBoat boat;
+    private final ArrayList<BlockFace> blockFaces;
     private float waterHeight;
 
     private Vec3 position;
@@ -38,6 +39,47 @@ public class BoatPhysicsHandler {
         this.angularVelocity = Vec3.ZERO.toVector3f();
 
         this.inverseInertia = getInertia().invert();
+
+        this.blockFaces = getBlockFaces();
+    }
+
+    // TODO: mark faces as exposed or not
+    private ArrayList<BlockFace> getBlockFaces() {
+        ArrayList<BlockFace> faces = new ArrayList<>();
+
+        HashMap<BlockPos, BlockState> blocks = this.boat.getBlockPositions();
+        for (BlockPos blockPos : this.boat.getBlockPositions().keySet()) {
+            Vec3 position = blockPos.getCenter()
+                .add(new Vec3(this.boat.getMinPosition()));
+
+            BlockPos[] neighbours = {
+                blockPos.above(),
+                blockPos.below(),
+                blockPos.west(),
+                blockPos.east(),
+                blockPos.south(),
+                blockPos.north(),
+            };
+
+            Vec3[] normals = {
+                new Vec3(0, 1, 0),
+                new Vec3(0, -1, 0),
+                new Vec3(1, 0, 0),
+                new Vec3(-1, 0, 0),
+                new Vec3(0, 0, 1),
+                new Vec3(0, 0, -1),
+            };
+
+            for (int i = 0; i < neighbours.length; i++) {
+                if (blocks.containsKey(neighbours[i])) {
+                    float airDragFactor = 0.01f; // TODO: vary based on block?
+                    float waterDragFactor = 1f;
+                    faces.add(new BlockFace(position, normals[i], airDragFactor, waterDragFactor));
+                }
+            }
+        }
+
+        return faces;
     }
 
     // Treating the boat as a set of particles where each particle is the centre of the block
@@ -94,9 +136,7 @@ public class BoatPhysicsHandler {
         this.waterHeight += 1;
     }
 
-    private Vec3 boatToWorld(BlockPos blockPos) {
-        Vec3 position = blockPos.getCenter().add(new Vec3(boat.getMinPosition()));
-
+    private Vec3 boatToWorld(Vec3 position) {
         Vector4f rotated = new Vector4f((float) position.x, (float) position.y, (float) position.z, 1f);
         Quaternionf rotation = new Quaternionf(this.rotation.x, this.rotation.y, this.rotation.z, this.rotation.w);
 
@@ -106,25 +146,45 @@ public class BoatPhysicsHandler {
         return newPosition.add(boat.position());
     }
 
+    private Vec3 boatToWorld(BlockPos blockPos) {
+        Vec3 position = blockPos.getCenter().add(new Vec3(boat.getMinPosition()));
+        return this.boatToWorld(position);
+    }
+
     public void update(float dt) {
         this.calculateWaterHeight();
 
         // TODO: figure out realistic values for this per block
-        float bouyancyForce = 0.75f;
+        float waterWeight = 1f;
 
         ArrayList<Vec3> forces = new ArrayList<>();
         ArrayList<Vec3> forcePositions = new ArrayList<>();
 
+        // Calculate bouyancy
         HashMap<BlockPos, BlockState> blocks = this.boat.getBlockPositions();
         for (BlockPos blockPos : blocks.keySet()) {
             Vec3 position = boatToWorld(blockPos);
 
-            double depth = -Math.min(position.y - this.waterHeight, 0);
-            double mag = depth * bouyancyForce;
+            // volume will be 1m x 1m x (y - waterHeight), so we can simplify
+            // depth does not affect buoyancy, so we cap it to [0, 1] x waterWeight
+            double depth = -Math.max(Math.min(position.y - this.waterHeight, 0), -1f);
+            double mag = depth * waterWeight;
             Vec3 force = new Vec3(0, 1, 0).scale(mag);
 
             forces.add(force);
             forcePositions.add(position.subtract(boat.position()));
+        }
+
+        // Calculate drag
+        Vector3f velocity = this.position.toVector3f().sub(this.oldPosition.toVector3f());
+        for (BlockFace face : this.blockFaces) {
+            Vec3 facePosition = face.getPosition();
+            Vec3 facePositionWorld = this.boatToWorld(facePosition);
+            boolean isSubmerged = facePositionWorld.y < this.waterHeight;
+
+            Vec3 drag = face.getDrag(new Vec3(velocity), new Vec3(this.angularVelocity), isSubmerged);
+            forces.add(drag);
+            forcePositions.add(face.getPosition());
         }
 
         Vec3 acceleration = gravity;
