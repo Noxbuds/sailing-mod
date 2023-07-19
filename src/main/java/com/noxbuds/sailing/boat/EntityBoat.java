@@ -18,6 +18,7 @@ import net.minecraft.world.entity.*;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.entity.IEntityAdditionalSpawnData;
 import net.minecraftforge.network.NetworkHooks;
@@ -25,22 +26,43 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Set;
 
 public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private static final EntityDataAccessor<Vector3f> MIN_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Vector3f> MAX_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Quaternionf> ROTATION = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.QUATERNION);
+    private static final EntityDataAccessor<Vector3f> VELOCITY = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
+    private static final EntityDataAccessor<Vector3f> ANGULAR_VELOCITY = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
 
     private HashMap<BlockPos, BlockState> blockPositions;
+    private ArrayList<BlockFace> blockFaces;
     private BoatPhysicsHandler physicsHandler;
+    private BoatCollisionHandler collisionHandler;
 
     public EntityBoat(EntityType<? extends EntityBoat> type, Level level) {
         super(type, level);
         this.blockPositions = new HashMap<>();
+        this.blockFaces = new ArrayList<>();
+
+        this.physicsHandler = new BoatPhysicsHandler(this);
+        this.collisionHandler = new BoatCollisionHandler(this);
+    }
+
+    @Override
+    public boolean canBeCollidedWith() {
+        return false;
+    }
+
+    @Override
+    public boolean canCollideWith(Entity p_20303_) {
+         return false;
     }
 
     @Override
@@ -49,6 +71,20 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             // tick rate is 20/s
             float dt = 1 / 20f;
             this.physicsHandler.update(dt);
+
+            this.entityData.set(VELOCITY, this.physicsHandler.getVelocity().toVector3f());
+            this.entityData.set(ANGULAR_VELOCITY, this.physicsHandler.getAngularVelocity().toVector3f());
+        }
+
+        Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
+        Vec3 maxPos = this.boatToWorld(new Vec3(this.getMaxPosition()));
+        AABB boundingBox = new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
+        boundingBox = boundingBox.inflate(5);
+
+        List<Entity> entities = level().getEntities(this, boundingBox);
+        for (Entity entity : entities) {
+            entity.setNoGravity(false);
+            this.collisionHandler.handleCollision(entity);
         }
     }
 
@@ -62,6 +98,46 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
         centre = centre.scale(1f / positions.size());
         return centre;
+    }
+
+    // TODO: mark faces as exposed or not
+    private void setBlockFaces() {
+        ArrayList<BlockFace> faces = new ArrayList<>();
+
+        HashMap<BlockPos, BlockState> blocks = this.getBlocks();
+        for (BlockPos blockPos : this.getBlocks().keySet()) {
+            Vec3 position = blockPos.getCenter()
+                .add(new Vec3(this.getMinPosition()));
+
+            BlockPos[] neighbours = {
+                blockPos.above(),
+                blockPos.below(),
+                blockPos.west(),
+                blockPos.east(),
+                blockPos.south(),
+                blockPos.north(),
+            };
+
+            Vec3[] normals = {
+                new Vec3(0, 1, 0),
+                new Vec3(0, -1, 0),
+                new Vec3(1, 0, 0),
+                new Vec3(-1, 0, 0),
+                new Vec3(0, 0, 1),
+                new Vec3(0, 0, -1),
+            };
+
+            for (int i = 0; i < neighbours.length; i++) {
+                if (blocks.containsKey(neighbours[i])) {
+                    float airDragFactor = 0.05f; // TODO: vary based on block?
+                    float waterDragFactor = 0.5f;
+                    Vec3 edgePosition = position.add(normals[i].scale(0.5f));
+                    faces.add(new BlockFace(edgePosition, normals[i], airDragFactor, waterDragFactor));
+                }
+            }
+        }
+
+        this.blockFaces = faces;
     }
 
     // Takes a set of block world positions and block states, and puts them into the block positions map with
@@ -104,7 +180,9 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             this.blockPositions.put(new BlockPos(newPos), blocks.get(position));
         }
 
+        this.setBlockFaces();
         this.physicsHandler = new BoatPhysicsHandler(this);
+        this.collisionHandler = new BoatCollisionHandler(this);
     }
 
     // Called from the server to sync the ship data with clients
@@ -118,11 +196,40 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     // This is called by the packet handler when a block packet is received on the client
     public void updateBlock(BlockPos position, BlockState state) {
         this.blockPositions.put(position, state);
+
+        this.physicsHandler = new BoatPhysicsHandler(this);
+        this.collisionHandler = new BoatCollisionHandler(this);
     }
 
+    public Vec3 boatToWorld(Vec3 position) {
+        Vector4f rotated = new Vector4f((float) position.x, (float) position.y, (float) position.z, 1f);
+        Quaternionf rotation = this.getRotation();
 
-    public HashMap<BlockPos, BlockState> getBlockPositions() {
+        rotated = rotation.transform(rotated);
+
+        Vec3 newPosition = new Vec3(rotated.x, rotated.y, rotated.z);
+        return newPosition.add(position());
+    }
+
+    public Vec3 boatToWorld(BlockPos blockPos) {
+        Vec3 position = blockPos.getCenter().add(new Vec3(getMinPosition()));
+        return this.boatToWorld(position);
+    }
+
+    public Vec3 worldToBoat(Vec3 position) {
+        Vec3 relative = position.subtract(position());
+        Quaternionf rotation = this.getRotation();
+
+        Vector3f rotated = rotation.transformInverse(relative.toVector3f());
+        return new Vec3(rotated);
+    }
+
+    public HashMap<BlockPos, BlockState> getBlocks() {
         return this.blockPositions;
+    }
+
+    public ArrayList<BlockFace> getBlockFaces() {
+        return this.blockFaces;
     }
 
     public Vector3f getMinPosition() {
@@ -141,6 +248,14 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         this.entityData.set(ROTATION, rotation, true);
     }
 
+    public Vec3 getVelocity() {
+        return new Vec3(this.entityData.get(VELOCITY));
+    }
+
+    public Vec3 getAngularVelocity() {
+        return new Vec3(this.entityData.get(ANGULAR_VELOCITY));
+    }
+
     @Override
     public boolean shouldRender(double p_20296_, double p_20297_, double p_20298_) {
         return true;
@@ -151,6 +266,8 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         this.entityData.define(MIN_POS, new Vector3f(0));
         this.entityData.define(MAX_POS, new Vector3f(0));
         this.entityData.define(ROTATION, new Quaternionf().identity());
+        this.entityData.define(VELOCITY, new Vector3f(0));
+        this.entityData.define(ANGULAR_VELOCITY, new Vector3f(0));
     }
 
     @Override
@@ -171,6 +288,16 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         float quaternionW = nbt.getFloat("quaternionW");
         this.entityData.set(ROTATION, new Quaternionf(quaternionX, quaternionY, quaternionZ, quaternionW), true);
 
+        float velocityX = nbt.getFloat("velocityX");
+        float velocityY = nbt.getFloat("velocityY");
+        float velocityZ = nbt.getFloat("velocityZ");
+        this.entityData.set(MAX_POS, new Vector3f(velocityX, velocityY, velocityZ));
+
+        float angularVelocityX = nbt.getFloat("angularVelocityX");
+        float angularVelocityY = nbt.getFloat("angularVelocityY");
+        float angularVelocityZ = nbt.getFloat("angularVelocityZ");
+        this.entityData.set(MAX_POS, new Vector3f(angularVelocityX, angularVelocityY, angularVelocityZ));
+
         this.blockPositions = new HashMap<>();
 
         byte[] bytes = nbt.getByteArray("blockPositions");
@@ -190,7 +317,9 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             this.blockPositions.put(position, state);
         }
 
+        this.setBlockFaces();
         this.physicsHandler = new BoatPhysicsHandler(this);
+        this.collisionHandler = new BoatCollisionHandler(this);
     }
 
     @Override
@@ -210,6 +339,16 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         nbt.putFloat("quaternionY", quaternion.y);
         nbt.putFloat("quaternionZ", quaternion.z);
         nbt.putFloat("quaternionW", quaternion.w);
+
+        Vector3f velocityPos = this.entityData.get(MAX_POS);
+        nbt.putFloat("velocityX", velocityPos.x);
+        nbt.putFloat("velocityY", velocityPos.y);
+        nbt.putFloat("velocityZ", velocityPos.z);
+
+        Vector3f angularVelocityPos = this.entityData.get(MAX_POS);
+        nbt.putFloat("angularVelocityX", angularVelocityPos.x);
+        nbt.putFloat("angularVelocityY", angularVelocityPos.y);
+        nbt.putFloat("angularVelocityZ", angularVelocityPos.z);
 
         ByteBuffer buffer = ByteBuffer.allocate(this.blockPositions.size() * 12);
 

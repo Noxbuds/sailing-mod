@@ -14,7 +14,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec2;
-import net.minecraft.world.phys.Vec3;
 import org.joml.*;
 import org.joml.Math;
 
@@ -35,7 +34,7 @@ public class BoatRenderer extends EntityRenderer {
         poseStack.pushPose();
 
         EntityBoat boat = (EntityBoat)entity;
-        HashMap<BlockPos, BlockState> blocks = boat.getBlockPositions();
+        HashMap<BlockPos, BlockState> blocks = boat.getBlocks();
         Vector3f minPos = boat.getMinPosition();
 
         BlockRenderDispatcher blockRenderer = Minecraft.getInstance().getBlockRenderer();

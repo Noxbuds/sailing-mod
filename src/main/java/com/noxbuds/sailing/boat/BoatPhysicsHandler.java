@@ -6,7 +6,6 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
-import org.joml.Vector4f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,7 +13,6 @@ import java.util.HashMap;
 public class BoatPhysicsHandler {
     private final Vec3 gravity = new Vec3(0, -9.8, 0);
     private final EntityBoat boat;
-    private final ArrayList<BlockFace> blockFaces;
     private float waterHeight;
 
     private Vec3 position;
@@ -39,47 +37,6 @@ public class BoatPhysicsHandler {
         this.angularVelocity = Vec3.ZERO.toVector3f();
 
         this.inverseInertia = getInertia().invert();
-
-        this.blockFaces = getBlockFaces();
-    }
-
-    // TODO: mark faces as exposed or not
-    private ArrayList<BlockFace> getBlockFaces() {
-        ArrayList<BlockFace> faces = new ArrayList<>();
-
-        HashMap<BlockPos, BlockState> blocks = this.boat.getBlockPositions();
-        for (BlockPos blockPos : this.boat.getBlockPositions().keySet()) {
-            Vec3 position = blockPos.getCenter()
-                .add(new Vec3(this.boat.getMinPosition()));
-
-            BlockPos[] neighbours = {
-                blockPos.above(),
-                blockPos.below(),
-                blockPos.west(),
-                blockPos.east(),
-                blockPos.south(),
-                blockPos.north(),
-            };
-
-            Vec3[] normals = {
-                new Vec3(0, 1, 0),
-                new Vec3(0, -1, 0),
-                new Vec3(1, 0, 0),
-                new Vec3(-1, 0, 0),
-                new Vec3(0, 0, 1),
-                new Vec3(0, 0, -1),
-            };
-
-            for (int i = 0; i < neighbours.length; i++) {
-                if (blocks.containsKey(neighbours[i])) {
-                    float airDragFactor = 0.01f; // TODO: vary based on block?
-                    float waterDragFactor = 1f;
-                    faces.add(new BlockFace(position, normals[i], airDragFactor, waterDragFactor));
-                }
-            }
-        }
-
-        return faces;
     }
 
     // Treating the boat as a set of particles where each particle is the centre of the block
@@ -87,7 +44,7 @@ public class BoatPhysicsHandler {
     private Matrix3f getInertia() {
         Matrix3f tensor = new Matrix3f();
 
-        HashMap<BlockPos, BlockState> blocks = boat.getBlockPositions();
+        HashMap<BlockPos, BlockState> blocks = boat.getBlocks();
         for (BlockPos blockPos : blocks.keySet()) {
             Vector3f dir = blockPos.getCenter().toVector3f().sub(boat.getMinPosition());
 
@@ -136,19 +93,12 @@ public class BoatPhysicsHandler {
         this.waterHeight += 1;
     }
 
-    private Vec3 boatToWorld(Vec3 position) {
-        Vector4f rotated = new Vector4f((float) position.x, (float) position.y, (float) position.z, 1f);
-        Quaternionf rotation = new Quaternionf(this.rotation.x, this.rotation.y, this.rotation.z, this.rotation.w);
-
-        rotated = rotation.transform(rotated);
-
-        Vec3 newPosition = new Vec3(rotated.x, rotated.y, rotated.z);
-        return newPosition.add(boat.position());
+    public Vec3 getVelocity() {
+        return this.position.subtract(oldPosition);
     }
 
-    private Vec3 boatToWorld(BlockPos blockPos) {
-        Vec3 position = blockPos.getCenter().add(new Vec3(boat.getMinPosition()));
-        return this.boatToWorld(position);
+    public Vec3 getAngularVelocity() {
+        return new Vec3(this.angularVelocity);
     }
 
     public void update(float dt) {
@@ -161,9 +111,9 @@ public class BoatPhysicsHandler {
         ArrayList<Vec3> forcePositions = new ArrayList<>();
 
         // Calculate bouyancy
-        HashMap<BlockPos, BlockState> blocks = this.boat.getBlockPositions();
+        HashMap<BlockPos, BlockState> blocks = this.boat.getBlocks();
         for (BlockPos blockPos : blocks.keySet()) {
-            Vec3 position = boatToWorld(blockPos);
+            Vec3 position = this.boat.boatToWorld(blockPos);
 
             // volume will be 1m x 1m x (y - waterHeight), so we can simplify
             // depth does not affect buoyancy, so we cap it to [0, 1] x waterWeight
@@ -177,9 +127,9 @@ public class BoatPhysicsHandler {
 
         // Calculate drag
         Vector3f velocity = this.position.toVector3f().sub(this.oldPosition.toVector3f());
-        for (BlockFace face : this.blockFaces) {
+        for (BlockFace face : this.boat.getBlockFaces()) {
             Vec3 facePosition = face.getPosition();
-            Vec3 facePositionWorld = this.boatToWorld(facePosition);
+            Vec3 facePositionWorld = this.boat.boatToWorld(facePosition);
             boolean isSubmerged = facePositionWorld.y < this.waterHeight;
 
             Vec3 drag = face.getDrag(new Vec3(velocity), new Vec3(this.angularVelocity), isSubmerged);
@@ -211,16 +161,18 @@ public class BoatPhysicsHandler {
         // This doesn't quite seem accurate, but it looks good enough
         // Rotation/angular velocity code based on https://gafferongames.com/post/physics_in_3d/
         this.angularMomentum = this.angularMomentum.add(torque);
-        this.angularVelocity = this.inverseInertia.transform(this.angularMomentum);
+
+        // JOML modifies vectors - we need to do a new vector3f here because transform modifies the vector you pass in
+        this.angularVelocity = this.inverseInertia.transform(new Vector3f(this.angularMomentum));
 
         Quaternionf deltaRotation = new Quaternionf(this.angularVelocity.x, this.angularVelocity.y, this.angularVelocity.z, 0);
         Quaternionf spin = deltaRotation.mul(0.5f).mul(this.rotation);
 
         Quaternionf newRotation = new Quaternionf();
-        newRotation.x = this.rotation.x * 2f - this.oldRotation.x + spin.x;
-        newRotation.y = this.rotation.y * 2f - this.oldRotation.y + spin.y;
-        newRotation.z = this.rotation.z * 2f - this.oldRotation.z + spin.z;
-        newRotation.w = this.rotation.w * 2f - this.oldRotation.w + spin.w;
+        newRotation.x = this.rotation.x + spin.x;
+        newRotation.y = this.rotation.y + spin.y;
+        newRotation.z = this.rotation.z + spin.z;
+        newRotation.w = this.rotation.w + spin.w;
         newRotation.normalize();
 
         this.oldRotation = new Quaternionf(this.rotation);
