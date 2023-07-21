@@ -24,9 +24,12 @@ public class BlockFace {
         // angular velocity vector, so it can be found by taking their cross product
         Vec3 velocityFromAngular = new Vec3(angularVelocity.toVector3f()).cross(this.position);
         Vec3 totalVelocity = velocityFromAngular.add(velocity);
+        Vec3 velocityDirection = totalVelocity.normalize();
 
         float dragFactor = isSubmerged ? this.waterDragFactor : this.airDragFactor;
+        double dragAngle = Math.max(velocityDirection.dot(this.normal), 0);
+        double dragMagnitude = -1 * dragAngle * dragFactor * totalVelocity.length();
 
-        return totalVelocity.scale(dragFactor * totalVelocity.length()).scale(-1f);
+        return this.normal.scale(dragMagnitude);
     }
 }
