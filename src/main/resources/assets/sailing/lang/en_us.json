@@ -1,4 +1,5 @@
 {
-  "block.sailing.helm_block": "Helm Block",
+  "block.sailing.helm_block": "Helm",
+  "block.sailing.propeller_block": "Propeller",
   "item_group.sailing.tab": "Sailing Mod"
 }

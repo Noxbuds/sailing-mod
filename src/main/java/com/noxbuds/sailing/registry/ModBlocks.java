@@ -16,6 +16,7 @@ public class ModBlocks {
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, SailingMod.MODID);
 
     public static final RegistryObject<Block> HELM_BLOCK = registerBlock("helm_block", HelmBlock::new);
+    public static final RegistryObject<Block> PROPELLER_BLOCK = registerBlock("propeller_block", HelmBlock::new);
 
     private static <T extends Block> RegistryObject<T> registerBlock(String name, Supplier<T> supplier) {
         RegistryObject<T> registeredBlock = BLOCKS.register(name, supplier);

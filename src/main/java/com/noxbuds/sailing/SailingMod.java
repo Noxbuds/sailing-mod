@@ -39,6 +39,7 @@ public class SailingMod
             .icon(() -> ModBlocks.HELM_BLOCK.get().asItem().getDefaultInstance())
             .displayItems((parameters, output) -> {
                 output.accept(ModBlocks.HELM_BLOCK.get());
+                output.accept(ModBlocks.PROPELLER_BLOCK.get());
             }).build());
 
     public static final SimpleChannel CHANNEL = SailingNetworking.getChannel();
