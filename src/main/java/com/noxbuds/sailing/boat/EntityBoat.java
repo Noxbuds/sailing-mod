@@ -68,6 +68,14 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     }
 
     @Override
+    public AABB getBoundingBoxForCulling() {
+        Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
+        Vec3 maxPos = this.boatToWorld(new Vec3(this.getMaxPosition()));
+
+        return new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
+    }
+
+    @Override
     public void tick() {
         if (!level().isClientSide() && this.physicsHandler != null) {
             // tick rate is 20/s
