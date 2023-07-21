@@ -1,5 +1,6 @@
 package com.noxbuds.sailing.boat;
 
+import com.noxbuds.sailing.BlockMass;
 import com.noxbuds.sailing.SailingMod;
 import com.noxbuds.sailing.network.BoatBlockMessage;
 import com.noxbuds.sailing.network.BoatRequestMessage;
@@ -32,7 +33,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
 
 public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private static final EntityDataAccessor<Vector3f> MIN_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
@@ -41,14 +41,16 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private static final EntityDataAccessor<Vector3f> VELOCITY = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Vector3f> ANGULAR_VELOCITY = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
 
-    private HashMap<BlockPos, BlockState> blockPositions;
+    private HashMap<BlockPos, BlockState> blocks;
+    private float totalMass;
     private ArrayList<BlockFace> blockFaces;
     private BoatPhysicsHandler physicsHandler;
     private BoatCollisionHandler collisionHandler;
 
     public EntityBoat(EntityType<? extends EntityBoat> type, Level level) {
         super(type, level);
-        this.blockPositions = new HashMap<>();
+        this.blocks = new HashMap<>();
+        this.totalMass = 0f;
         this.blockFaces = new ArrayList<>();
 
         this.physicsHandler = new BoatPhysicsHandler(this);
@@ -88,16 +90,25 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         }
     }
 
-    private Vec3 calculateCentreOfMass(Set<BlockPos> positions) {
-        //TODO: calculate mass of blocks and use it to weight position
+    private Vec3 calculateCentreOfMass(HashMap<BlockPos, BlockState> blocks) {
         Vec3 centre = Vec3.ZERO;
+        float totalMass = 0;
 
-        for (BlockPos pos : positions) {
-            centre = centre.add(pos.getCenter());
+        for (BlockPos blockPos : blocks.keySet()) {
+            float mass = BlockMass.get(blocks.get(blockPos));
+            centre = centre.add(blockPos.getCenter().scale(mass));
+            totalMass += mass;
         }
 
-        centre = centre.scale(1f / positions.size());
-        return centre;
+        return centre.scale(1f / totalMass);
+    }
+
+    private void calculateTotalMass() {
+        this.totalMass = 0f;
+
+        for (BlockPos blockPos : this.blocks.keySet()) {
+            this.totalMass += BlockMass.get(this.blocks.get(blockPos));
+        }
     }
 
     // TODO: mark faces as exposed or not
@@ -129,8 +140,9 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
             for (int i = 0; i < neighbours.length; i++) {
                 if (blocks.containsKey(neighbours[i])) {
-                    float airDragFactor = 0.05f; // TODO: vary based on block?
-                    float waterDragFactor = 0.5f;
+                    float airDragFactor = 1e2f;
+                    float waterDragFactor = 1e4f;
+
                     Vec3 edgePosition = position.add(normals[i].scale(0.5f));
                     faces.add(new BlockFace(edgePosition, normals[i], airDragFactor, waterDragFactor));
                 }
@@ -143,7 +155,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     // Takes a set of block world positions and block states, and puts them into the block positions map with
     // positions relative to the boat. Should only be called when server is spawning the boat.
     public void setBlocks(HashMap<BlockPos, BlockState> blocks) {
-        Vec3 centreOfMass = calculateCentreOfMass(blocks.keySet());
+        Vec3 centreOfMass = calculateCentreOfMass(blocks);
         this.setPos(centreOfMass.subtract(0.5, 0.5, 0.5));
 
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
@@ -177,26 +189,28 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
         for (BlockPos position : blocks.keySet()) {
             Vec3i newPos = position.subtract(new Vec3i(minX, minY, minZ));
-            this.blockPositions.put(new BlockPos(newPos), blocks.get(position));
+            this.blocks.put(new BlockPos(newPos), blocks.get(position));
         }
 
         this.setBlockFaces();
+        this.calculateTotalMass();
         this.physicsHandler = new BoatPhysicsHandler(this);
         this.collisionHandler = new BoatCollisionHandler(this);
     }
 
     // Called from the server to sync the ship data with clients
     public void syncData() {
-        for (BlockPos pos : this.blockPositions.keySet()) {
-            BoatBlockMessage message = new BoatBlockMessage(this.getId(), pos, this.blockPositions.get(pos));
+        for (BlockPos pos : this.blocks.keySet()) {
+            BoatBlockMessage message = new BoatBlockMessage(this.getId(), pos, this.blocks.get(pos));
             SailingMod.CHANNEL.send(PacketDistributor.ALL.noArg(), message);
         }
     }
 
     // This is called by the packet handler when a block packet is received on the client
     public void updateBlock(BlockPos position, BlockState state) {
-        this.blockPositions.put(position, state);
+        this.blocks.put(position, state);
 
+        this.calculateTotalMass();
         this.physicsHandler = new BoatPhysicsHandler(this);
         this.collisionHandler = new BoatCollisionHandler(this);
     }
@@ -225,7 +239,11 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     }
 
     public HashMap<BlockPos, BlockState> getBlocks() {
-        return this.blockPositions;
+        return this.blocks;
+    }
+
+    public float getTotalMass() {
+        return this.totalMass;
     }
 
     public ArrayList<BlockFace> getBlockFaces() {
@@ -298,7 +316,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         float angularVelocityZ = nbt.getFloat("angularVelocityZ");
         this.entityData.set(MAX_POS, new Vector3f(angularVelocityX, angularVelocityY, angularVelocityZ));
 
-        this.blockPositions = new HashMap<>();
+        this.blocks = new HashMap<>();
 
         byte[] bytes = nbt.getByteArray("blockPositions");
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
@@ -314,7 +332,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             HolderGetter<Block> holder = level().holderLookup(ForgeRegistries.BLOCKS.getRegistryKey());
             BlockState state = NbtUtils.readBlockState(holder, stateNbt);
 
-            this.blockPositions.put(position, state);
+            this.blocks.put(position, state);
         }
 
         this.setBlockFaces();
@@ -350,9 +368,9 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         nbt.putFloat("angularVelocityY", angularVelocityPos.y);
         nbt.putFloat("angularVelocityZ", angularVelocityPos.z);
 
-        ByteBuffer buffer = ByteBuffer.allocate(this.blockPositions.size() * 12);
+        ByteBuffer buffer = ByteBuffer.allocate(this.blocks.size() * 12);
 
-        for (BlockPos pos : this.blockPositions.keySet()) {
+        for (BlockPos pos : this.blocks.keySet()) {
             buffer.putInt(pos.getX());
             buffer.putInt(pos.getY());
             buffer.putInt(pos.getZ());
@@ -360,8 +378,8 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
         nbt.putByteArray("blockPositions", buffer.array());
 
-        for (BlockPos pos : this.blockPositions.keySet()) {
-            CompoundTag stateNbt = NbtUtils.writeBlockState(this.blockPositions.get(pos));
+        for (BlockPos pos : this.blocks.keySet()) {
+            CompoundTag stateNbt = NbtUtils.writeBlockState(this.blocks.get(pos));
             nbt.put(pos.toShortString(), stateNbt);
         }
     }

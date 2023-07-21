@@ -1,5 +1,6 @@
 package com.noxbuds.sailing.boat;
 
+import com.noxbuds.sailing.BlockMass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -7,6 +8,7 @@ import org.joml.Matrix3f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import javax.print.attribute.EnumSyntax;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -15,11 +17,13 @@ public class BoatPhysicsHandler {
     private final EntityBoat boat;
     private float waterHeight;
 
+    private final ArrayList<Vec3> forces;
+    private final ArrayList<Vec3> forcePositions;
+
     private Vec3 position;
     private Vec3 oldPosition;
 
     private Quaternionf rotation;
-    private Quaternionf oldRotation;
     private Vector3f angularMomentum;
     private Vector3f angularVelocity;
 
@@ -27,11 +31,14 @@ public class BoatPhysicsHandler {
 
     public BoatPhysicsHandler(EntityBoat boat) {
         this.boat = boat;
+
+        this.forces = new ArrayList<>();
+        this.forcePositions = new ArrayList<>();
+
         this.position = new Vec3(boat.position().toVector3f());
         this.oldPosition = new Vec3(this.position.toVector3f());
 
         this.rotation = new Quaternionf(boat.getRotation());
-        this.oldRotation= new Quaternionf(boat.getRotation());
 
         this.angularMomentum = Vec3.ZERO.toVector3f();
         this.angularVelocity = Vec3.ZERO.toVector3f();
@@ -58,8 +65,7 @@ public class BoatPhysicsHandler {
                 dir.z * dir.x, dir.z * dir.y, dir.z * dir.z
             ).transpose();
 
-            // TODO: get actual block mass
-            float mass = 1f;
+            float mass = BlockMass.get(blocks.get(blockPos));
             Matrix3f sum = leftSide.add(rightSide).scale(mass);
             tensor.add(sum);
         }
@@ -68,8 +74,8 @@ public class BoatPhysicsHandler {
     }
 
     private void calculateWaterHeight() {
-        Vec3 minPos = new Vec3(boat.getMinPosition()).add(boat.position());
-        Vec3 maxPos = new Vec3(boat.getMaxPosition()).add(boat.position());
+        Vec3 minPos = boat.boatToWorld(new Vec3(boat.getMinPosition()));
+        Vec3 maxPos = boat.boatToWorld(new Vec3(boat.getMaxPosition()));
 
         BlockPos minBlockPos = new BlockPos((int)minPos.x, (int)minPos.y, (int)minPos.z);
         BlockPos maxBlockPos = new BlockPos((int)maxPos.x, (int)maxPos.y, (int)maxPos.z);
@@ -101,60 +107,57 @@ public class BoatPhysicsHandler {
         return new Vec3(this.angularVelocity);
     }
 
-    public void update(float dt) {
-        this.calculateWaterHeight();
+    private void calculateBuoyancy() {
+        for (BlockPos blockPos : this.boat.getBlocks().keySet()) {
+            Vec3 boatPosition = blockPos.getCenter().add(new Vec3(this.boat.getMinPosition()));
+            Vec3 worldPosition = this.boat.boatToWorld(blockPos);
 
-        // TODO: figure out realistic values for this per block
-        float waterWeight = 1f;
+            // volume will be 1m x 1m x (y - waterHeight), so we can simplify to just use depth (capped to block height)
+            double depth = -Math.max(Math.min(worldPosition.y - this.waterHeight, 0), -1f);
+            double buoyancy = depth * BlockMass.WATER_MASS * Math.abs(this.gravity.y);
 
-        ArrayList<Vec3> forces = new ArrayList<>();
-        ArrayList<Vec3> forcePositions = new ArrayList<>();
-
-        // Calculate bouyancy
-        HashMap<BlockPos, BlockState> blocks = this.boat.getBlocks();
-        for (BlockPos blockPos : blocks.keySet()) {
-            Vec3 position = this.boat.boatToWorld(blockPos);
-
-            // volume will be 1m x 1m x (y - waterHeight), so we can simplify
-            // depth does not affect buoyancy, so we cap it to [0, 1] x waterWeight
-            double depth = -Math.max(Math.min(position.y - this.waterHeight, 0), -1f);
-            double mag = depth * waterWeight;
-            Vec3 force = new Vec3(0, 1, 0).scale(mag);
-
-            forces.add(force);
-            forcePositions.add(position.subtract(boat.position()));
+            this.forces.add(new Vec3(0, 1, 0).scale(buoyancy));
+            this.forcePositions.add(boatPosition);
         }
+    }
 
-        // Calculate drag
+    private void calculateDrag() {
         Vector3f velocity = this.position.toVector3f().sub(this.oldPosition.toVector3f());
+
         for (BlockFace face : this.boat.getBlockFaces()) {
-            Vec3 facePosition = face.getPosition();
-            Vec3 facePositionWorld = this.boat.boatToWorld(facePosition);
-            boolean isSubmerged = facePositionWorld.y < this.waterHeight;
+            Vec3 boatPosition = face.getPosition();
+            Vec3 worldPosition = this.boat.boatToWorld(boatPosition);
+            boolean isSubmerged = worldPosition.y < this.waterHeight;
 
             Vec3 drag = face.getDrag(new Vec3(velocity), new Vec3(this.angularVelocity), isSubmerged);
-            forces.add(drag);
-            forcePositions.add(face.getPosition());
+            this.forces.add(drag);
+            this.forcePositions.add(boatPosition);
         }
+    }
 
-        Vec3 acceleration = gravity;
-        Vec3 rotationAcceleration = new Vec3(0f, 0f, 0f); // add small value to prevent divide by zero
+    private void resolveAcceleration(float dt) {
+        Vec3 acceleration = this.gravity;
 
-        for (int i = 0; i < forces.size(); i++) {
-            // TODO: handle block weight (assuming weight of 1kg each)
-            acceleration = acceleration.add(forces.get(i));
-
-            Vec3 torque = forcePositions.get(i).cross(forces.get(i));
-            rotationAcceleration = rotationAcceleration.add(torque);
+        for (Vec3 force : this.forces) {
+            Vec3 deltaAcceleration = force.scale(1 / this.boat.getTotalMass());
+            acceleration = acceleration.add(deltaAcceleration);
         }
 
         Vec3 newPosition = this.position.scale(2f)
-                .subtract(this.oldPosition)
-                .add(acceleration.scale(dt * dt));
+            .subtract(this.oldPosition)
+            .add(acceleration.scale(dt * dt));
 
         this.oldPosition = new Vec3(this.position.toVector3f());
         this.position = newPosition;
-        boat.moveTo(this.position);
+    }
+
+    private void resolveAngularMomentum() {
+        Vec3 rotationAcceleration = new Vec3(0f, 0f, 0f); // add small value to prevent divide by zero
+
+        for (int i = 0; i < this.forces.size(); i++) {
+            Vec3 torque = this.forcePositions.get(i).cross(this.forces.get(i));
+            rotationAcceleration = rotationAcceleration.add(torque);
+        }
 
         Vector3f torque = rotationAcceleration.toVector3f();
 
@@ -175,9 +178,21 @@ public class BoatPhysicsHandler {
         newRotation.w = this.rotation.w + spin.w;
         newRotation.normalize();
 
-        this.oldRotation = new Quaternionf(this.rotation);
         this.rotation = newRotation;
+    }
 
+    public void update(float dt) {
+        this.forces.clear();
+        this.forcePositions.clear();
+
+        this.calculateWaterHeight();
+        calculateBuoyancy();
+        calculateDrag();
+
+        resolveAcceleration(dt);
+        resolveAngularMomentum();
+
+        boat.moveTo(this.position);
         boat.setRotation(this.rotation);
     }
 }

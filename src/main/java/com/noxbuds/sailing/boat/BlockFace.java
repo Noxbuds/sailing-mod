@@ -27,6 +27,6 @@ public class BlockFace {
 
         float dragFactor = isSubmerged ? this.waterDragFactor : this.airDragFactor;
 
-        return totalVelocity.scale(dragFactor).scale(-1f);
+        return totalVelocity.scale(dragFactor * totalVelocity.length()).scale(-1f);
     }
 }
