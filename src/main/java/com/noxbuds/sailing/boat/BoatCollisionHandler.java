@@ -29,8 +29,9 @@ public class BoatCollisionHandler {
 
         HashMap<BlockPos, BlockState> blocks = this.boat.getBlocks();
 
-        Vec3 velocity = this.boat.getVelocity();
-        Vec3 angularVelocity = this.boat.getAngularVelocity();
+        BoatPhysicsHandler physicsHandler = this.boat.getPhysicsHandler();
+        Vec3 velocity = physicsHandler.getVelocity();
+        Vec3 angularVelocity = physicsHandler.getAngularVelocity();
         Quaternionf rotation = this.boat.getRotation();
 
         for (BlockPos blockPos : blocks.keySet()) {

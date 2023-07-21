@@ -38,8 +38,6 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private static final EntityDataAccessor<Vector3f> MIN_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Vector3f> MAX_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Quaternionf> ROTATION = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.QUATERNION);
-    private static final EntityDataAccessor<Vector3f> VELOCITY = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
-    private static final EntityDataAccessor<Vector3f> ANGULAR_VELOCITY = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
 
     private HashMap<BlockPos, BlockState> blocks;
     private float totalMass;
@@ -77,13 +75,14 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
     @Override
     public void tick() {
+        if (this.totalMass == 0f) {
+            this.calculateTotalMass();
+        }
+
         if (!level().isClientSide() && this.physicsHandler != null) {
             // tick rate is 20/s
             float dt = 1 / 20f;
             this.physicsHandler.update(dt);
-
-            this.entityData.set(VELOCITY, this.physicsHandler.getVelocity().toVector3f());
-            this.entityData.set(ANGULAR_VELOCITY, this.physicsHandler.getAngularVelocity().toVector3f());
         }
 
         Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
@@ -274,12 +273,8 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         this.entityData.set(ROTATION, rotation, true);
     }
 
-    public Vec3 getVelocity() {
-        return new Vec3(this.entityData.get(VELOCITY));
-    }
-
-    public Vec3 getAngularVelocity() {
-        return new Vec3(this.entityData.get(ANGULAR_VELOCITY));
+    public BoatPhysicsHandler getPhysicsHandler() {
+        return this.physicsHandler;
     }
 
     @Override
@@ -292,8 +287,6 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         this.entityData.define(MIN_POS, new Vector3f(0));
         this.entityData.define(MAX_POS, new Vector3f(0));
         this.entityData.define(ROTATION, new Quaternionf().identity());
-        this.entityData.define(VELOCITY, new Vector3f(0));
-        this.entityData.define(ANGULAR_VELOCITY, new Vector3f(0));
     }
 
     @Override
@@ -313,16 +306,6 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         float quaternionZ = nbt.getFloat("quaternionZ");
         float quaternionW = nbt.getFloat("quaternionW");
         this.entityData.set(ROTATION, new Quaternionf(quaternionX, quaternionY, quaternionZ, quaternionW), true);
-
-        float velocityX = nbt.getFloat("velocityX");
-        float velocityY = nbt.getFloat("velocityY");
-        float velocityZ = nbt.getFloat("velocityZ");
-        this.entityData.set(MAX_POS, new Vector3f(velocityX, velocityY, velocityZ));
-
-        float angularVelocityX = nbt.getFloat("angularVelocityX");
-        float angularVelocityY = nbt.getFloat("angularVelocityY");
-        float angularVelocityZ = nbt.getFloat("angularVelocityZ");
-        this.entityData.set(MAX_POS, new Vector3f(angularVelocityX, angularVelocityY, angularVelocityZ));
 
         this.blocks = new HashMap<>();
 
@@ -345,6 +328,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
         this.setBlockFaces();
         this.physicsHandler = new BoatPhysicsHandler(this);
+        this.physicsHandler.readData(nbt);
         this.collisionHandler = new BoatCollisionHandler(this);
     }
 
@@ -366,16 +350,6 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         nbt.putFloat("quaternionZ", quaternion.z);
         nbt.putFloat("quaternionW", quaternion.w);
 
-        Vector3f velocityPos = this.entityData.get(MAX_POS);
-        nbt.putFloat("velocityX", velocityPos.x);
-        nbt.putFloat("velocityY", velocityPos.y);
-        nbt.putFloat("velocityZ", velocityPos.z);
-
-        Vector3f angularVelocityPos = this.entityData.get(MAX_POS);
-        nbt.putFloat("angularVelocityX", angularVelocityPos.x);
-        nbt.putFloat("angularVelocityY", angularVelocityPos.y);
-        nbt.putFloat("angularVelocityZ", angularVelocityPos.z);
-
         ByteBuffer buffer = ByteBuffer.allocate(this.blocks.size() * 12);
 
         for (BlockPos pos : this.blocks.keySet()) {
@@ -390,6 +364,8 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             CompoundTag stateNbt = NbtUtils.writeBlockState(this.blocks.get(pos));
             nbt.put(pos.toShortString(), stateNbt);
         }
+
+        this.physicsHandler.writeData(nbt);
     }
 
     // The following code is a bit naff, but this is the only way I found to sync entity IDs and then send a request

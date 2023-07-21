@@ -2,6 +2,7 @@ package com.noxbuds.sailing.boat;
 
 import com.noxbuds.sailing.BlockMass;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
@@ -103,6 +104,10 @@ public class BoatPhysicsHandler {
         return this.position.subtract(oldPosition);
     }
 
+    public Vec3 getAngularMomentum() {
+        return new Vec3(this.angularMomentum);
+    }
+
     public Vec3 getAngularVelocity() {
         return new Vec3(this.angularVelocity);
     }
@@ -194,5 +199,28 @@ public class BoatPhysicsHandler {
 
         boat.moveTo(this.position);
         boat.setRotation(this.rotation);
+    }
+
+    public void readData(CompoundTag nbt) {
+        float velocityX = nbt.getFloat("velocityX");
+        float velocityY = nbt.getFloat("velocityY");
+        float velocityZ = nbt.getFloat("velocityZ");
+        this.oldPosition = this.oldPosition.subtract(velocityX, velocityY, velocityZ);
+
+        float angularMomentumX = nbt.getFloat("angularMomentumX");
+        float angularMomentumY = nbt.getFloat("angularMomentumY");
+        float angularMomentumZ = nbt.getFloat("angularMomentumZ");
+        this.angularMomentum = new Vector3f(angularMomentumX, angularMomentumY, angularMomentumZ);
+    }
+
+    public void writeData(CompoundTag nbt) {
+        Vector3f velocity = this.getVelocity().toVector3f();
+        nbt.putFloat("velocityX", velocity.x);
+        nbt.putFloat("velocityY", velocity.y);
+        nbt.putFloat("velocityZ", velocity.z);
+
+        nbt.putFloat("angularMomentumX", angularMomentum.x);
+        nbt.putFloat("angularMomentumY", angularMomentum.y);
+        nbt.putFloat("angularMomentumZ", angularMomentum.z);
     }
 }
