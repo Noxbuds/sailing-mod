@@ -1,8 +1,8 @@
 package com.noxbuds.sailing.block;
 
 import com.mojang.logging.LogUtils;
-import com.noxbuds.sailing.SailingMod;
 import com.noxbuds.sailing.boat.EntityBoat;
+import com.noxbuds.sailing.registry.ModEntities;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -59,7 +59,7 @@ public class HelmBlock extends Block {
         if (!level.isClientSide) {
             HashMap<BlockPos, BlockState> connected = getConnectedBlocks(level, pos);
 
-            EntityBoat boat = new EntityBoat(SailingMod.BOAT_TYPE.get(), level);
+            EntityBoat boat = new EntityBoat(ModEntities.BOAT_TYPE.get(), level);
             boat.setBlocks(connected);
 
             level.addFreshEntity(boat);

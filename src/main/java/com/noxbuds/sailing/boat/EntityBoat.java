@@ -56,16 +56,6 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     }
 
     @Override
-    public boolean canBeCollidedWith() {
-        return false;
-    }
-
-    @Override
-    public boolean canCollideWith(Entity p_20303_) {
-         return false;
-    }
-
-    @Override
     public AABB getBoundingBoxForCulling() {
         Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
         Vec3 maxPos = this.boatToWorld(new Vec3(this.getMaxPosition()));
