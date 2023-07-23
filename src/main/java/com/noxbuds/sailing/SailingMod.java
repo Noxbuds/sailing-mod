@@ -41,7 +41,7 @@ public class SailingMod
                 // TODO: automate this
                 output.accept(ModBlocks.HELM_BLOCK.get());
                 output.accept(ModBlocks.PROPELLER_BLOCK.get());
-                output.accept(ModBlocks.ROTATING_BLOCK.get());
+                output.accept(ModBlocks.AXLE_BLOCK.get());
             }).build());
 
     public static final SimpleChannel CHANNEL = SailingNetworking.getChannel();

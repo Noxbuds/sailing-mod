@@ -310,14 +310,12 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         for (BlockPos blockPos : this.blocks.keySet()) {
             BlockState blockState = this.blocks.get(blockPos).blockState();
             if (blockState.getBlock() instanceof RotatingBlock) {
-                Vec3 position = new Vec3(this.getMinPosition())
-                    .add(new Vec3(0.5, 0.5, 0.5))
-                    .add(blockPos.getCenter());
-                Vec3 axis = new Vec3(0, 1, 0);
-                // TODO: get axis and first neighbour from block
+                RotatingBlock block = (RotatingBlock) blockState.getBlock();
+                Vec3 base = block.getBase(blockPos, blockState).add(new Vec3(this.getMinPosition()));
+                Vec3 axis = block.getAxis(blockPos, blockState);
 
-                basePositions.add(blockPos.above());
-                this.rotatingComponents.add(new RotatingComponent(position, axis));
+                basePositions.add(block.getFirstBlock(blockPos, blockState));
+                this.rotatingComponents.add(new RotatingComponent(base, axis));
             }
         }
 

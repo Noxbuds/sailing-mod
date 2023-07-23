@@ -3,7 +3,7 @@ package com.noxbuds.sailing.registry;
 import com.noxbuds.sailing.SailingMod;
 import com.noxbuds.sailing.block.HelmBlock;
 import com.noxbuds.sailing.block.PropellerBlock;
-import com.noxbuds.sailing.block.RotatingBlock;
+import com.noxbuds.sailing.block.RotatingAxleBlock;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
@@ -19,7 +19,7 @@ public class ModBlocks {
 
     public static final RegistryObject<Block> HELM_BLOCK = registerBlock("helm_block", HelmBlock::new);
     public static final RegistryObject<Block> PROPELLER_BLOCK = registerBlock("propeller_block", PropellerBlock::new);
-    public static final RegistryObject<Block> ROTATING_BLOCK = registerBlock("rotating_block", RotatingBlock::new);
+    public static final RegistryObject<Block> AXLE_BLOCK = registerBlock("axle_block", RotatingAxleBlock::new);
 
     private static <T extends Block> RegistryObject<T> registerBlock(String name, Supplier<T> supplier) {
         RegistryObject<T> registeredBlock = BLOCKS.register(name, supplier);

@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=up": { "model": "sailing:block/axle_block", "x": 270 },
+    "facing=down": { "model": "sailing:block/axle_block", "x": 90 },
+    "facing=north": { "model": "sailing:block/axle_block" },
+    "facing=east": { "model": "sailing:block/axle_block", "y": 90 },
+    "facing=south": { "model": "sailing:block/axle_block", "y": 180 },
+    "facing=west": { "model": "sailing:block/axle_block", "y": 270 }
+  }
+}
