@@ -5,8 +5,11 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.client.model.renderable.IRenderable;
+import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.util.HashMap;
 
@@ -25,9 +28,7 @@ public class BoatCollisionHandler {
         minPos = this.boat.worldToBoat(minPos);
         maxPos = this.boat.worldToBoat(maxPos);
 
-        AABB relativeBB = new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
-
-        HashMap<BlockPos, BlockState> blocks = this.boat.getBlocks();
+        HashMap<BlockPos, BoatBlockContainer> blocks = this.boat.getBlocks();
 
         BoatPhysicsHandler physicsHandler = this.boat.getPhysicsHandler();
         Vec3 velocity = physicsHandler.getVelocity();
@@ -37,6 +38,24 @@ public class BoatCollisionHandler {
         for (BlockPos blockPos : blocks.keySet()) {
             Vec3 blockMin = new Vec3(blockPos.getX(), blockPos.getY(), blockPos.getZ());
             blockMin = blockMin.add(new Vec3(this.boat.getMinPosition()));
+
+            AABB relativeBB = new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
+            BoatBlockContainer container = blocks.get(blockPos);
+            if (container.componentId().isPresent()) {
+                RotatingComponent component = boat.getRotatingComponent(container.componentId().get());
+                if (component != null) {
+                    Matrix4f transformation = boat.getRotatingComponent(container.componentId().get()).getTransformationMatrix();
+                    transformation.invert();
+
+                    Vector4f localMin = new Vector4f((float) minPos.x, (float) minPos.y, (float) minPos.z, 1f);
+                    Vector4f localMax = new Vector4f((float) maxPos.x, (float) maxPos.y, (float) maxPos.z, 1f);
+
+                    transformation.transform(localMin);
+                    transformation.transform(localMax);
+
+                    relativeBB = new AABB(localMin.x, localMin.y, localMin.z, localMax.x, localMax.y, localMax.z);
+                }
+            }
 
             AABB blockBB = new AABB(blockMin.x, blockMin.y, blockMin.z, blockMin.x + 1, blockMin.y + 1.5f, blockMin.z + 1);
 
@@ -49,8 +68,9 @@ public class BoatCollisionHandler {
                 }
                 movement = new Vec3(movement.x, 0, movement.z);
 
-                Vector3f blockVelocity = angularVelocity.cross(blockBB.getCenter()).add(velocity).toVector3f();
+                Vector3f blockVelocity = angularVelocity.cross(blockBB.getCenter()).toVector3f();
                 rotation.transform(blockVelocity);
+                blockVelocity = blockVelocity.add(velocity.toVector3f());
 
                 newPosition = newPosition.add(new Vec3(blockVelocity));
 

@@ -25,6 +25,6 @@ public class BoatBlockPacketHandler {
             return;
         }
 
-        boat.updateBlock(message.position(), message.state());
+        boat.updateBlock(message.position(), message.container());
     }
 }

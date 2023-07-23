@@ -2,6 +2,8 @@ package com.noxbuds.sailing.boat;
 
 import com.noxbuds.sailing.BlockMass;
 import com.noxbuds.sailing.SailingMod;
+import com.noxbuds.sailing.block.HelmBlock;
+import com.noxbuds.sailing.block.RotatingBlock;
 import com.noxbuds.sailing.network.BoatBlockMessage;
 import com.noxbuds.sailing.network.BoatRequestMessage;
 import net.minecraft.core.BlockPos;
@@ -15,7 +17,10 @@ import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.*;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -30,29 +35,27 @@ import org.joml.Vector3f;
 import org.joml.Vector4f;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 
 public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private static final EntityDataAccessor<Vector3f> MIN_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Vector3f> MAX_POS = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.VECTOR3);
     private static final EntityDataAccessor<Quaternionf> ROTATION = SynchedEntityData.defineId(EntityBoat.class, EntityDataSerializers.QUATERNION);
 
-    private HashMap<BlockPos, BlockState> blocks;
+    private HashMap<BlockPos, BoatBlockContainer> blocks;
     private float totalMass;
     private ArrayList<BlockFace> blockFaces;
     private BoatPhysicsHandler physicsHandler;
+    private ArrayList<RotatingComponent> rotatingComponents;
     private BoatCollisionHandler collisionHandler;
+    private BoatControlHandler controlHandler;
 
     public EntityBoat(EntityType<? extends EntityBoat> type, Level level) {
         super(type, level);
         this.blocks = new HashMap<>();
+        this.rotatingComponents = new ArrayList<>();
         this.totalMass = 0f;
         this.blockFaces = new ArrayList<>();
-
-        this.physicsHandler = new BoatPhysicsHandler(this);
-        this.collisionHandler = new BoatCollisionHandler(this);
     }
 
     @Override
@@ -63,36 +66,130 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         return new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
     }
 
+    private void updateBoundingBox() {
+        Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
+        Vec3 maxPos = this.boatToWorld(new Vec3(this.getMaxPosition()));
+
+        AABB aabb = new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
+        aabb = aabb.inflate(1);
+
+        this.setBoundingBox(aabb);
+    }
+
+    @Override
+    public boolean isPickable() {
+        return true;
+    }
+
+    private BlockPos raycast(Player player) {
+        // TODO: this algorithm is quite slow - fine for now but maybe worth improving later
+        float maxDistance = 5f;
+        Vec3 minPosition = new Vec3(this.getMinPosition());
+        Vec3 direction = player.getLookAngle();
+        Vec3 position = player.getPosition(0);
+
+        float playerHeight = player.getBbHeight();
+        position = position.add(0, playerHeight, 0);
+        position = this.worldToBoat(position);
+        position = position.subtract(minPosition);
+
+        float distance = 0;
+        Vec3 gridPosition = new Vec3(Math.floor(position.x), Math.floor(position.y), Math.floor(position.z));
+
+        while (distance < maxDistance) {
+
+            BlockPos blockPos = new BlockPos((int) gridPosition.x, (int) gridPosition.y, (int) gridPosition.z);
+            BoatBlockContainer container = this.blocks.get(blockPos);
+            if (container != null) {
+                return blockPos;
+            }
+
+            distance += 0.05f;
+            gridPosition = position.add(direction.scale(distance));
+            gridPosition = gridPosition.subtract(0.5, 0.5, 0.5);
+            gridPosition = new Vec3(Math.floor(gridPosition.x), Math.floor(gridPosition.y), Math.floor(gridPosition.z));
+        }
+
+        return null;
+    }
+
+    @Override
+    public InteractionResult interact(Player player, InteractionHand hand) {
+        if (!level().isClientSide) {
+            BlockPos blockPos = raycast(player);
+
+            if (blockPos == null) {
+                return InteractionResult.FAIL;
+            }
+
+            BlockState blockState = this.blocks.get(blockPos).blockState();
+            if (blockState.getBlock() instanceof HelmBlock && this.controlHandler != null) {
+                player.startRiding(this);
+                this.controlHandler.addController(player, blockPos);
+            }
+        }
+
+        return InteractionResult.SUCCESS;
+    }
+
+//    @Override
+//    protected void positionRider(Entity entity, MoveFunction moveFunction) {
+//
+//    }
+
+
+    @Override
+    protected void removePassenger(Entity entity) {
+        super.removePassenger(entity);
+        if (entity instanceof Player) {
+            this.controlHandler.removeController((Player) entity);
+        }
+    }
+
     @Override
     public void tick() {
+        // tick rate is 20/s
+        float dt = 1 / 20f;
+
         if (this.totalMass == 0f) {
             this.calculateTotalMass();
         }
 
         if (!level().isClientSide() && this.physicsHandler != null) {
-            // tick rate is 20/s
-            float dt = 1 / 20f;
             this.physicsHandler.update(dt);
         }
 
-        Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
-        Vec3 maxPos = this.boatToWorld(new Vec3(this.getMaxPosition()));
-        AABB boundingBox = new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
-        boundingBox = boundingBox.inflate(5);
+        this.updateBoundingBox();
 
-        List<Entity> entities = level().getEntities(this, boundingBox);
-        for (Entity entity : entities) {
-            entity.setNoGravity(false);
-            this.collisionHandler.handleCollision(entity);
+        if (this.collisionHandler != null) {
+            Vec3 minPos = this.boatToWorld(new Vec3(this.getMinPosition()));
+            Vec3 maxPos = this.boatToWorld(new Vec3(this.getMaxPosition()));
+            AABB boundingBox = new AABB(minPos.x, minPos.y, minPos.z, maxPos.x, maxPos.y, maxPos.z);
+            boundingBox = boundingBox.inflate(5);
+
+            List<Entity> entities = level().getEntities(this, boundingBox);
+            for (Entity entity : entities) {
+                entity.setNoGravity(false);
+                this.collisionHandler.handleCollision(entity);
+            }
+        }
+
+        // TODO: sync with client somehow
+        for (RotatingComponent component : this.rotatingComponents) {
+            component.update(dt);
+        }
+
+        if (!level().isClientSide() && this.controlHandler != null) {
+            this.controlHandler.update(dt);
         }
     }
 
-    private Vec3 calculateCentreOfMass(HashMap<BlockPos, BlockState> blocks) {
+    private Vec3 calculateCentreOfMass(HashMap<BlockPos, BoatBlockContainer> blocks) {
         Vec3 centre = Vec3.ZERO;
         float totalMass = 0;
 
         for (BlockPos blockPos : blocks.keySet()) {
-            float mass = BlockMass.get(blocks.get(blockPos));
+            float mass = BlockMass.get(blocks.get(blockPos).blockState());
             centre = centre.add(blockPos.getCenter().scale(mass));
             totalMass += mass;
         }
@@ -104,7 +201,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         this.totalMass = 0f;
 
         for (BlockPos blockPos : this.blocks.keySet()) {
-            this.totalMass += BlockMass.get(this.blocks.get(blockPos));
+            this.totalMass += BlockMass.get(this.blocks.get(blockPos).blockState());
         }
     }
 
@@ -112,7 +209,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private void setBlockFaces() {
         ArrayList<BlockFace> faces = new ArrayList<>();
 
-        HashMap<BlockPos, BlockState> blocks = this.getBlocks();
+        HashMap<BlockPos, BoatBlockContainer> blocks = this.getBlocks();
         for (BlockPos blockPos : this.getBlocks().keySet()) {
             Vec3 position = blockPos.getCenter()
                 .add(new Vec3(this.getMinPosition()));
@@ -151,7 +248,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
     // Takes a set of block world positions and block states, and puts them into the block positions map with
     // positions relative to the boat. Should only be called when server is spawning the boat.
-    public void setBlocks(HashMap<BlockPos, BlockState> blocks) {
+    public void setBlocks(HashMap<BlockPos, BoatBlockContainer> blocks) {
         Vec3 centreOfMass = calculateCentreOfMass(blocks);
         this.setPos(centreOfMass.subtract(0.5, 0.5, 0.5));
 
@@ -189,10 +286,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             this.blocks.put(new BlockPos(newPos), blocks.get(position));
         }
 
-        this.setBlockFaces();
-        this.calculateTotalMass();
-        this.physicsHandler = new BoatPhysicsHandler(this);
-        this.collisionHandler = new BoatCollisionHandler(this);
+        this.attachHandlers();
     }
 
     // Called from the server to sync the ship data with clients
@@ -204,12 +298,70 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     }
 
     // This is called by the packet handler when a block packet is received on the client
-    public void updateBlock(BlockPos position, BlockState state) {
+    public void updateBlock(BlockPos position, BoatBlockContainer state) {
         this.blocks.put(position, state);
+        this.attachHandlers();
+    }
 
+    private void findRotatingComponents() {
+        ArrayList<BlockPos> basePositions = new ArrayList<>();
+        this.rotatingComponents = new ArrayList<>();
+
+        for (BlockPos blockPos : this.blocks.keySet()) {
+            BlockState blockState = this.blocks.get(blockPos).blockState();
+            if (blockState.getBlock() instanceof RotatingBlock) {
+                Vec3 position = new Vec3(this.getMinPosition())
+                    .add(new Vec3(0.5, 0.5, 0.5))
+                    .add(blockPos.getCenter());
+                Vec3 axis = new Vec3(0, 1, 0);
+                // TODO: get axis and first neighbour from block
+
+                basePositions.add(blockPos.above());
+                this.rotatingComponents.add(new RotatingComponent(position, axis));
+            }
+        }
+
+        for (int i = 0; i < this.rotatingComponents.size(); i++) {
+            ArrayList<BlockPos> queue = new ArrayList<>();
+            queue.add(basePositions.get(i));
+
+            while (!queue.isEmpty()) {
+                BlockPos next = queue.remove(0);
+                BlockPos[] neighbours = { next.above(), next.below(), next.north(), next.south(), next.east(), next.west() };
+
+                for (BlockPos neighbour: neighbours) {
+                    BoatBlockContainer container = this.blocks.get(neighbour);
+
+                    if (container == null || container.blockState().getBlock() instanceof RotatingBlock || container.componentId().isPresent()) {
+                        continue;
+                    }
+
+                    BoatBlockContainer newContainer = new BoatBlockContainer(container.blockState(), Optional.of(i));
+                    this.blocks.put(neighbour, newContainer);
+                    queue.add(neighbour);
+                }
+            }
+        }
+    }
+
+    public RotatingComponent getRotatingComponent(int index) {
+        if (index < this.rotatingComponents.size())
+            return this.rotatingComponents.get(index);
+
+        return null;
+    }
+
+    private void attachHandlers() {
+        this.setBlockFaces();
         this.calculateTotalMass();
+
         this.physicsHandler = new BoatPhysicsHandler(this);
+        this.findRotatingComponents();
+
         this.collisionHandler = new BoatCollisionHandler(this);
+        this.updateBoundingBox();
+
+        this.controlHandler = new BoatControlHandler(this);
     }
 
     public Vec3 boatToWorld(Vec3 position) {
@@ -235,7 +387,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         return new Vec3(rotated);
     }
 
-    public HashMap<BlockPos, BlockState> getBlocks() {
+    public HashMap<BlockPos, BoatBlockContainer> getBlocks() {
         return this.blocks;
     }
 
@@ -265,6 +417,10 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
     public BoatPhysicsHandler getPhysicsHandler() {
         return this.physicsHandler;
+    }
+
+    public BoatControlHandler getControlHandler() {
+        return this.controlHandler;
     }
 
     @Override
@@ -309,11 +465,16 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
             BlockPos position = new BlockPos(x, y, z);
 
-            CompoundTag stateNbt = nbt.getCompound(position.toShortString());
+            CompoundTag stateNbt = nbt.getCompound(position.toShortString() + ":state");
             HolderGetter<Block> holder = level().holderLookup(ForgeRegistries.BLOCKS.getRegistryKey());
             BlockState state = NbtUtils.readBlockState(holder, stateNbt);
 
-            this.blocks.put(position, state);
+            Optional<Integer> componentId = Optional.empty();
+            if (nbt.contains(position.toShortString() + ":componentId")) {
+                componentId = Optional.of(nbt.getInt(position.toShortString() + ":componentId"));
+            }
+
+            this.blocks.put(position, new BoatBlockContainer(state, componentId));
         }
 
         this.setBlockFaces();
@@ -351,8 +512,14 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         nbt.putByteArray("blockPositions", buffer.array());
 
         for (BlockPos pos : this.blocks.keySet()) {
-            CompoundTag stateNbt = NbtUtils.writeBlockState(this.blocks.get(pos));
-            nbt.put(pos.toShortString(), stateNbt);
+            BoatBlockContainer container = this.blocks.get(pos);
+
+            CompoundTag stateNbt = NbtUtils.writeBlockState(container.blockState());
+            nbt.put(pos.toShortString() + ":state", stateNbt);
+
+            if (container.componentId().isPresent()) {
+                nbt.putInt(pos.toShortString() + ":componentId", container.componentId().get());
+            }
         }
 
         this.physicsHandler.writeData(nbt);

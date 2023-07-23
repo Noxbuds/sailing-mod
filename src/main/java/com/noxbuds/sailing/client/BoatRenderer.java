@@ -2,7 +2,9 @@ package com.noxbuds.sailing.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.noxbuds.sailing.boat.BoatBlockContainer;
 import com.noxbuds.sailing.boat.EntityBoat;
+import com.noxbuds.sailing.boat.RotatingComponent;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
@@ -34,22 +36,34 @@ public class BoatRenderer extends EntityRenderer {
         poseStack.pushPose();
 
         EntityBoat boat = (EntityBoat)entity;
-        HashMap<BlockPos, BlockState> blocks = boat.getBlocks();
+        HashMap<BlockPos, BoatBlockContainer> blocks = boat.getBlocks();
         Vector3f minPos = boat.getMinPosition();
 
         BlockRenderDispatcher blockRenderer = Minecraft.getInstance().getBlockRenderer();
 
         for (BlockPos blockPos : blocks.keySet()) {
+            BoatBlockContainer container = blocks.get(blockPos);
+
             poseStack.pushPose();
             Vector3f position = blockPos.getCenter().toVector3f();
 
             Quaternionf rotation = new Quaternionf(boat.getRotation());
             poseStack.mulPose(rotation);
 
+            if (container.componentId().isPresent()) {
+                int componentId = container.componentId().get();
+                RotatingComponent component = boat.getRotatingComponent(componentId);
+                if (component != null) {
+                    Matrix4f componentMatrix = component.getTransformationMatrix();
+                    poseStack.mulPoseMatrix(componentMatrix);
+                }
+            }
+
             poseStack.translate(minPos.x, minPos.y, minPos.z);
             poseStack.translate(position.x, position.y, position.z);
 
-            blockRenderer.renderSingleBlock(blocks.get(blockPos), poseStack, bufferSource, light, OverlayTexture.NO_OVERLAY);
+
+            blockRenderer.renderSingleBlock(container.blockState(), poseStack, bufferSource, light, OverlayTexture.NO_OVERLAY);
             poseStack.popPose();
         }
 

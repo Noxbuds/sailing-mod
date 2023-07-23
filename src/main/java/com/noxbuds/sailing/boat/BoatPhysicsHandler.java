@@ -1,8 +1,10 @@
 package com.noxbuds.sailing.boat;
 
 import com.noxbuds.sailing.BlockMass;
+import com.noxbuds.sailing.block.PropellerBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
@@ -51,7 +53,7 @@ public class BoatPhysicsHandler {
     private Matrix3f getInertia() {
         Matrix3f tensor = new Matrix3f();
 
-        HashMap<BlockPos, BlockState> blocks = boat.getBlocks();
+        HashMap<BlockPos, BoatBlockContainer> blocks = boat.getBlocks();
         for (BlockPos blockPos : blocks.keySet()) {
             Vector3f dir = blockPos.getCenter().toVector3f().sub(boat.getMinPosition());
 
@@ -65,7 +67,7 @@ public class BoatPhysicsHandler {
                 dir.z * dir.x, dir.z * dir.y, dir.z * dir.z
             ).transpose();
 
-            float mass = BlockMass.get(blocks.get(blockPos));
+            float mass = BlockMass.get(blocks.get(blockPos).blockState());
             Matrix3f sum = leftSide.add(rightSide).scale(mass);
             tensor.add(sum);
         }
@@ -139,6 +141,25 @@ public class BoatPhysicsHandler {
         }
     }
 
+    private void calculateEngineForces() {
+        // TODO: handle engine direction and force
+        float engineForce = 10000f;
+        BoatControlHandler controlHandler = this.boat.getControlHandler();
+        if (controlHandler == null)
+            return;
+
+        HashMap<BlockPos, BoatBlockContainer> blocks = this.boat.getBlocks();
+        for (BlockPos blockPos : blocks.keySet()) {
+            Block block = blocks.get(blockPos).blockState().getBlock();
+            if (block instanceof PropellerBlock) {
+                Vec3 boatPosition = blockPos.getCenter().add(new Vec3(this.boat.getMinPosition()));
+
+                this.forces.add(new Vec3(0, 0, engineForce * controlHandler.getEngineThrottle()));
+                this.forcePositions.add(boatPosition);
+            }
+        }
+    }
+
     private void resolveAcceleration(float dt) {
         Vec3 acceleration = this.gravity;
 
@@ -156,14 +177,12 @@ public class BoatPhysicsHandler {
     }
 
     private void resolveAngularMomentum() {
-        Vec3 rotationAcceleration = new Vec3(0f, 0f, 0f); // add small value to prevent divide by zero
+        Vector3f torque = Vec3.ZERO.toVector3f(); // add small value to prevent divide by zero
 
         for (int i = 0; i < this.forces.size(); i++) {
-            Vec3 torque = this.forcePositions.get(i).cross(this.forces.get(i));
-            rotationAcceleration = rotationAcceleration.add(torque);
+            Vec3 localTorque = this.forcePositions.get(i).cross(this.forces.get(i));
+            torque = torque.add(localTorque.toVector3f());
         }
-
-        Vector3f torque = rotationAcceleration.toVector3f();
 
         // This doesn't quite seem accurate, but it looks good enough
         // Rotation/angular velocity code based on https://gafferongames.com/post/physics_in_3d/
@@ -172,17 +191,11 @@ public class BoatPhysicsHandler {
         // JOML modifies vectors - we need to do a new vector3f here because transform modifies the vector you pass in
         this.angularVelocity = this.inverseInertia.transform(new Vector3f(this.angularMomentum));
 
-        Quaternionf deltaRotation = new Quaternionf(this.angularVelocity.x, this.angularVelocity.y, this.angularVelocity.z, 0);
-        Quaternionf spin = deltaRotation.mul(0.5f).mul(this.rotation);
+        Quaternionf angularVelocityQuaternion = new Quaternionf(this.angularVelocity.x, this.angularVelocity.y, this.angularVelocity.z, 0);
+        Quaternionf spin = angularVelocityQuaternion.mul(0.5f).mul(this.rotation);
 
-        Quaternionf newRotation = new Quaternionf();
-        newRotation.x = this.rotation.x + spin.x;
-        newRotation.y = this.rotation.y + spin.y;
-        newRotation.z = this.rotation.z + spin.z;
-        newRotation.w = this.rotation.w + spin.w;
-        newRotation.normalize();
-
-        this.rotation = newRotation;
+        this.rotation = new Quaternionf(this.rotation).add(spin);
+        this.rotation.normalize();
     }
 
     public void update(float dt) {
@@ -192,6 +205,7 @@ public class BoatPhysicsHandler {
         this.calculateWaterHeight();
         calculateBuoyancy();
         calculateDrag();
+        calculateEngineForces();
 
         resolveAcceleration(dt);
         resolveAngularMomentum();
