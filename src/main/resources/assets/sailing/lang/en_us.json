@@ -3,6 +3,8 @@
   "block.sailing.propeller_block": "Propeller",
   "block.sailing.axle_block": "Axle",
   "block.sailing.rigging_block": "Rigging Block",
+  "block.sailing.winch_block": "Winch",
+  "block.sailing.rudder_block": "Rudder Base",
 
   "item.sailing.rigging_line": "Rigging Line",
 

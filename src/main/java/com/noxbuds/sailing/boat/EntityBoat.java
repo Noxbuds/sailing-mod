@@ -2,6 +2,7 @@ package com.noxbuds.sailing.boat;
 
 import com.noxbuds.sailing.BlockMass;
 import com.noxbuds.sailing.SailingMod;
+import com.noxbuds.sailing.block.BoatControlBlock;
 import com.noxbuds.sailing.block.HelmBlock;
 import com.noxbuds.sailing.block.RiggingBlockEntity;
 import com.noxbuds.sailing.block.RotatingBlock;
@@ -52,7 +53,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     private ArrayList<BlockFace> blockFaces;
     private BoatPhysicsHandler physicsHandler;
     private ArrayList<RotatingComponent> rotatingComponents;
-    private ArrayList<RiggingLine> riggingLines;
+    private HashMap<BlockPos, RiggingLine> riggingLines; // block position is the winch block
     private BoatCollisionHandler collisionHandler;
     private BoatControlHandler controlHandler;
 
@@ -60,7 +61,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         super(type, level);
         this.blocks = new HashMap<>();
         this.rotatingComponents = new ArrayList<>();
-        this.riggingLines = new ArrayList<>();
+        this.riggingLines = new HashMap<>();
         this.totalMass = 0f;
         this.blockFaces = new ArrayList<>();
     }
@@ -95,7 +96,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         Vec3 direction = player.getLookAngle();
         Vec3 position = player.getPosition(0);
 
-        float playerHeight = player.getBbHeight();
+        float playerHeight = player.getEyeHeight();
         position = position.add(0, playerHeight, 0);
         position = this.worldToBoat(position);
         position = position.subtract(minPosition);
@@ -130,7 +131,8 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             }
 
             BlockState blockState = this.blocks.get(blockPos).blockState();
-            if (blockState.getBlock() instanceof HelmBlock && this.controlHandler != null) {
+            System.out.println(blockState);
+            if (blockState.getBlock() instanceof BoatControlBlock && this.controlHandler != null) {
                 player.startRiding(this);
                 this.controlHandler.addController(player, blockPos);
             }
@@ -157,7 +159,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         }
 
         if (!level().isClientSide() && this.physicsHandler != null) {
-            for (RiggingLine line : this.riggingLines) {
+            for (RiggingLine line : this.riggingLines.values()) {
                 line.applyForces(this);
             }
 
@@ -238,12 +240,14 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             };
 
             for (int i = 0; i < neighbours.length; i++) {
-                if (blocks.containsKey(neighbours[i])) {
+                if (!blocks.containsKey(neighbours[i])) {
                     float airDragFactor = 1e2f;
                     float waterDragFactor = 1e4f;
 
+                    RotatingComponent component = this.getRotatingComponent(blockPos);
+
                     Vec3 edgePosition = position.add(normals[i].scale(0.5f));
-                    faces.add(new BlockFace(blockPos, edgePosition, normals[i], airDragFactor, waterDragFactor));
+                    faces.add(new BlockFace(blockPos, component, edgePosition, normals[i], airDragFactor, waterDragFactor));
                 }
             }
         }
@@ -301,7 +305,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
                 riggingLine.ifPresent(line -> {
                     line.offsetPositions(min);
-                    this.riggingLines.add(line);
+                    this.riggingLines.put(line.getWinchPos(), line);
                 });
             }
         }
@@ -315,7 +319,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
             SailingMod.CHANNEL.send(PacketDistributor.ALL.noArg(), message);
         }
 
-        for (RiggingLine line : this.riggingLines) {
+        for (RiggingLine line : this.riggingLines.values()) {
             BoatRiggingMessage message = new BoatRiggingMessage(this.getId(), line);
             SailingMod.CHANNEL.send(PacketDistributor.ALL.noArg(), message);
         }
@@ -349,7 +353,7 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     }
 
     public void addRiggingLine(RiggingLine line) {
-        this.riggingLines.add(line);
+        this.riggingLines.put(line.getWinchPos(), line);
     }
 
     private void findRotatingComponents() {
@@ -412,11 +416,11 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
     }
 
     private void attachHandlers() {
+        this.findRotatingComponents();
         this.setBlockFaces();
         this.calculateTotalMass();
 
         this.physicsHandler = new BoatPhysicsHandler(this);
-        this.findRotatingComponents();
 
         this.collisionHandler = new BoatCollisionHandler(this);
         this.updateBoundingBox();
@@ -465,6 +469,10 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
 
     public BoatBlockContainer getBlock(BlockPos blockPos) {
         return this.blocks.get(blockPos);
+    }
+
+    public RiggingLine getRiggingLine(BlockPos blockPos) {
+        return this.riggingLines.get(blockPos);
     }
 
     public float getTotalMass() {
@@ -557,13 +565,11 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         for (int i = 0; i < numLines; i++) {
             CompoundTag lineNbt = nbt.getCompound("line" + i);
             RiggingLine line = new RiggingLine(lineNbt);
-            this.riggingLines.add(line);
+            this.riggingLines.put(line.getWinchPos(), line);
         }
 
-        this.setBlockFaces();
-        this.physicsHandler = new BoatPhysicsHandler(this);
+        this.attachHandlers();
         this.physicsHandler.readData(nbt);
-        this.collisionHandler = new BoatCollisionHandler(this);
     }
 
     @Override
@@ -606,9 +612,11 @@ public class EntityBoat extends Entity implements IEntityAdditionalSpawnData {
         }
 
         nbt.putInt("lineCount", this.riggingLines.size());
-        for (int i = 0; i < this.riggingLines.size(); i++) {
-            CompoundTag lineNbt = this.riggingLines.get(i).getNBT();
-            nbt.put("line" + i, lineNbt);
+        int lineId = 0;
+        for (RiggingLine line : this.riggingLines.values()) {
+            CompoundTag lineNbt = line.getNBT();
+            nbt.put("line" + lineId, lineNbt);
+            lineId++;
         }
 
         this.physicsHandler.writeData(nbt);

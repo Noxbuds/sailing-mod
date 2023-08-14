@@ -27,7 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Optional;
 
-public class HelmBlock extends BoatControlBlock {
+public class HelmBlock extends Block implements BoatControlBlock {
     public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
     // TODO: make this configurable
     private static final int MAX_CONNECTED_BLOCKS = 1000;

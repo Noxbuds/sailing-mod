@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "sailing:block/axle_block", "x": 90 }
+  }
+}

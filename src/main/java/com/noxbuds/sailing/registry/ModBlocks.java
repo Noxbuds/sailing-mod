@@ -22,6 +22,8 @@ public class ModBlocks {
     public static final RegistryObject<Block> AXLE_BLOCK = registerBlock("axle_block", RotatingAxleBlock::new);
 
     public static final RegistryObject<Block> RIGGING_BLOCK = registerBlock("rigging_block", RiggingBlock::new);
+    public static final RegistryObject<Block> WINCH_BLOCK = registerBlock("winch_block", WinchBlock::new);
+    public static final RegistryObject<Block> RUDDER_BLOCK = registerBlock("rudder_block", RudderBlock::new);
     public static final RegistryObject<BlockEntityType<RiggingBlockEntity>> RIGGING_BLOCK_ENTITY = BLOCK_ENTITIES.register("rigging_block_entity",
         () -> BlockEntityType.Builder.of(RiggingBlockEntity::new, ModBlocks.RIGGING_BLOCK.get()).build(null)
     );

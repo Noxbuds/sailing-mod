@@ -43,6 +43,8 @@ public class SailingMod
                 output.accept(ModBlocks.PROPELLER_BLOCK.get());
                 output.accept(ModBlocks.AXLE_BLOCK.get());
                 output.accept(ModBlocks.RIGGING_BLOCK.get());
+                output.accept(ModBlocks.WINCH_BLOCK.get());
+                output.accept(ModBlocks.RUDDER_BLOCK.get());
 
                 output.accept(ModItems.RIGGING_LINE.get());
             }).build());

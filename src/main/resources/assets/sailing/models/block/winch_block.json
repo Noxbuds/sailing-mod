@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "sailing:block/winch_block",
+    "up": "minecraft:block/iron_block",
+    "down": "minecraft:block/iron_block"
+  }
+}

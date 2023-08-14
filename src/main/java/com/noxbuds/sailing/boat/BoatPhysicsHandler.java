@@ -154,7 +154,7 @@ public class BoatPhysicsHandler {
 
     private void calculateEngineForces() {
         // TODO: handle engine direction and force
-        float engineForce = 10000f;
+        float engineForce = 5e4f;
         BoatControlHandler controlHandler = this.boat.getControlHandler();
         if (controlHandler == null)
             return;

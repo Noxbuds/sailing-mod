@@ -3,22 +3,19 @@ package com.noxbuds.sailing.boat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 
-import java.util.HashMap;
-
 public class RiggingLine {
-    private BlockPos posA;
+    private BlockPos winchPos;
     private BlockPos posB;
 
     private double targetLength;
 
-    public RiggingLine(BlockPos posA, BlockPos posB) {
-        this.posA = posA;
+    public RiggingLine(BlockPos winchPos, BlockPos posB) {
+        this.winchPos = winchPos;
         this.posB = posB;
 
         this.targetLength = calculateLength();
@@ -28,7 +25,7 @@ public class RiggingLine {
         int ax = nbt.getInt("ax");
         int ay = nbt.getInt("ay");
         int az = nbt.getInt("az");
-        this.posA = new BlockPos(ax, ay, az);
+        this.winchPos = new BlockPos(ax, ay, az);
 
         int bx = nbt.getInt("bx");
         int by = nbt.getInt("by");
@@ -39,9 +36,9 @@ public class RiggingLine {
     public CompoundTag getNBT() {
         CompoundTag nbt = new CompoundTag();
 
-        nbt.putInt("ax", this.posA.getX());
-        nbt.putInt("ay", this.posA.getY());
-        nbt.putInt("az", this.posA.getZ());
+        nbt.putInt("ax", this.winchPos.getX());
+        nbt.putInt("ay", this.winchPos.getY());
+        nbt.putInt("az", this.winchPos.getZ());
 
         nbt.putInt("bx", this.posB.getX());
         nbt.putInt("by", this.posB.getY());
@@ -50,13 +47,25 @@ public class RiggingLine {
         return nbt;
     }
 
+    public BlockPos getWinchPos() {
+        return this.winchPos;
+    }
+
+    public double getTargetLength() {
+        return this.targetLength;
+    }
+
+    public void setTargetLength(double targetLength) {
+        this.targetLength = targetLength;
+    }
+
     public void offsetPositions(Vec3i offset) {
-        this.posA = this.posA.offset(offset);
+        this.winchPos = this.winchPos.offset(offset);
         this.posB = this.posB.offset(offset);
     }
 
     private double calculateLength() {
-        Vec3 posA = this.posA.getCenter();
+        Vec3 posA = this.winchPos.getCenter();
         Vec3 posB = this.posB.getCenter();
 
         return posA.subtract(posB).length();
@@ -78,15 +87,14 @@ public class RiggingLine {
     }
 
     public void applyForces(EntityBoat boat) {
-        RotatingComponent componentA = boat.getRotatingComponent(this.posA);
         RotatingComponent componentB = boat.getRotatingComponent(this.posB);
 
-        if (componentA == null && componentB == null) {
+        if (componentB == null) {
             return;
         }
 
         // modelling almost as a spring, but only applying force on extension rather than contraction
-        Vec3 posA = this.transformPosition(this.posA, boat);
+        Vec3 posA = this.transformPosition(this.winchPos, boat);
         Vec3 posB = this.transformPosition(this.posB, boat);
 
         Vec3 direction = posB.subtract(posA);
@@ -95,12 +103,6 @@ public class RiggingLine {
         double force = extension * 1e2; // TODO: figure out force constant
         Vec3 forceVectorA = direction.scale(force / length);
 
-        if (componentA != null) {
-            componentA.addForce(forceVectorA, posA);
-        }
-
-        if (componentB != null) {
-            componentB.addForce(forceVectorA.scale(-1), posB);
-        }
+        componentB.addForce(forceVectorA.scale(-1), posB);
     }
 }

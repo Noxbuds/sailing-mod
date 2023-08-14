@@ -34,6 +34,7 @@ public class RotatingComponent {
 
     public void setRotation(float rotation) {
         this.rotation = rotation;
+        this.angularMomentum = 0;
     }
 
     public float getRotation() {
@@ -50,6 +51,12 @@ public class RotatingComponent {
         return matrix;
     }
 
+    public Matrix4f getRotationMatrix() {
+        Matrix4f matrix = new Matrix4f();
+        matrix = matrix.rotate(this.rotation, this.axis.toVector3f());
+        return matrix;
+    }
+
     public void addForce(Vec3 force, Vec3 position) {
         this.forces.add(force);
         this.forcePositions.add(position.subtract(this.base));
@@ -57,7 +64,6 @@ public class RotatingComponent {
 
     public void update(float dt) {
         Vec3 torque = Vec3.ZERO;
-        torque = new Vec3(0, 1, 0);
 
         for (int i = 0; i < this.forces.size(); i++) {
             Vec3 localTorque = this.forcePositions.get(i).cross(this.forces.get(i));
