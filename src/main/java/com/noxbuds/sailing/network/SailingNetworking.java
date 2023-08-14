@@ -16,16 +16,28 @@ public class SailingNetworking {
             PROTOCOL_VERSION::equals
         );
 
-        channel.messageBuilder(BoatBlockMessage.class, 1)
+        channel.messageBuilder(BoatRequestMessage.class, 1)
+            .decoder(BoatRequestMessage::decode)
+            .encoder(BoatRequestMessage::encode)
+            .consumerMainThread(BoatRequestMessage::handle)
+            .add();
+
+        channel.messageBuilder(BoatBlockMessage.class, 2)
             .decoder(BoatBlockMessage::decode)
             .encoder(BoatBlockMessage::encode)
             .consumerMainThread(BoatBlockMessage::handle)
             .add();
 
-        channel.messageBuilder(BoatRequestMessage.class, 2)
-            .decoder(BoatRequestMessage::decode)
-            .encoder(BoatRequestMessage::encode)
-            .consumerMainThread(BoatRequestMessage::handle)
+        channel.messageBuilder(BoatRiggingMessage.class, 3)
+            .decoder(BoatRiggingMessage::decode)
+            .encoder(BoatRiggingMessage::encode)
+            .consumerMainThread(BoatRiggingMessage::handle)
+            .add();
+
+        channel.messageBuilder(BoatComponentMessage.class, 4)
+            .decoder(BoatComponentMessage::decode)
+            .encoder(BoatComponentMessage::encode)
+            .consumerMainThread(BoatComponentMessage::handle)
             .add();
 
         return channel;

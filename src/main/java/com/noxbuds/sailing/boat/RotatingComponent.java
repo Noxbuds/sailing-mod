@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,6 +15,8 @@ public class RotatingComponent {
     private final HashMap<BlockPos, BoatBlockContainer> blocks;
 
     private float rotation;
+    private float angularMomentum;
+
     private final ArrayList<Vec3> forces;
     private final ArrayList<Vec3> forcePositions;
 
@@ -23,6 +26,7 @@ public class RotatingComponent {
         this.blocks = new HashMap<>();
 
         this.rotation = 0f;
+        this.angularMomentum = 0f;
 
         this.forces = new ArrayList<>();
         this.forcePositions = new ArrayList<>();
@@ -30,6 +34,10 @@ public class RotatingComponent {
 
     public void setRotation(float rotation) {
         this.rotation = rotation;
+    }
+
+    public float getRotation() {
+        return this.rotation;
     }
 
     public Matrix4f getTransformationMatrix() {
@@ -44,14 +52,26 @@ public class RotatingComponent {
 
     public void addForce(Vec3 force, Vec3 position) {
         this.forces.add(force);
-        this.forcePositions.add(position);
+        this.forcePositions.add(position.subtract(this.base));
     }
 
     public void update(float dt) {
+        Vec3 torque = Vec3.ZERO;
+        torque = new Vec3(0, 1, 0);
+
+        for (int i = 0; i < this.forces.size(); i++) {
+            Vec3 localTorque = this.forcePositions.get(i).cross(this.forces.get(i));
+            torque = torque.add(localTorque);
+        }
+
+        // TODO: calculate inverse inertia - is it really necessary?
+        this.angularMomentum += torque.dot(this.axis);
+        float angularVelocity = this.angularMomentum / 100f;
+
+        this.rotation += angularVelocity * dt;
+
         this.forces.clear();
         this.forcePositions.clear();
-
-        this.rotation += dt;
     }
 
     // TODO: load/save state

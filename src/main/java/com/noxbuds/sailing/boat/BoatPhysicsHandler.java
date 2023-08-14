@@ -7,10 +7,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix3f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
+import org.joml.*;
 
+import java.lang.Math;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -113,17 +112,29 @@ public class BoatPhysicsHandler {
         return new Vec3(this.angularVelocity);
     }
 
+    public void addForce(Vec3 force, Vec3 position) {
+        this.forces.add(force);
+        this.forcePositions.add(position);
+    }
+
+    private void addForce(Vec3 force, BlockPos blockPos) {
+        Vec3 position = blockPos.getCenter().add(new Vec3(this.boat.getMinPosition()));
+
+        // TODO: apply to rotating component to simulate rudder effect, and add rotating component's angular velocity to drag
+        this.forces.add(force);
+        this.forcePositions.add(position);
+    }
+
     private void calculateBuoyancy() {
         for (BlockPos blockPos : this.boat.getBlocks().keySet()) {
-            Vec3 boatPosition = blockPos.getCenter().add(new Vec3(this.boat.getMinPosition()));
             Vec3 worldPosition = this.boat.boatToWorld(blockPos);
 
             // volume will be 1m x 1m x (y - waterHeight), so we can simplify to just use depth (capped to block height)
             double depth = -Math.max(Math.min(worldPosition.y - this.waterHeight, 0), -1f);
             double buoyancy = depth * BlockMass.WATER_MASS * Math.abs(this.gravity.y);
+            Vec3 force = new Vec3(0, 1, 0).scale(buoyancy);
 
-            this.forces.add(new Vec3(0, 1, 0).scale(buoyancy));
-            this.forcePositions.add(boatPosition);
+            this.addForce(force, blockPos);
         }
     }
 
@@ -136,8 +147,8 @@ public class BoatPhysicsHandler {
             boolean isSubmerged = worldPosition.y < this.waterHeight;
 
             Vec3 drag = face.getDrag(new Vec3(velocity), new Vec3(this.angularVelocity), isSubmerged);
-            this.forces.add(drag);
-            this.forcePositions.add(boatPosition);
+            // TODO: the position is not quite correct
+            this.addForce(drag, face.getBlockPos());
         }
     }
 
@@ -152,10 +163,8 @@ public class BoatPhysicsHandler {
         for (BlockPos blockPos : blocks.keySet()) {
             Block block = blocks.get(blockPos).blockState().getBlock();
             if (block instanceof PropellerBlock) {
-                Vec3 boatPosition = blockPos.getCenter().add(new Vec3(this.boat.getMinPosition()));
-
-                this.forces.add(new Vec3(0, 0, engineForce * controlHandler.getEngineThrottle()));
-                this.forcePositions.add(boatPosition);
+                Vec3 force = new Vec3(0, 0, engineForce * controlHandler.getEngineThrottle());
+                this.addForce(force, blockPos);
             }
         }
     }
@@ -199,9 +208,6 @@ public class BoatPhysicsHandler {
     }
 
     public void update(float dt) {
-        this.forces.clear();
-        this.forcePositions.clear();
-
         this.calculateWaterHeight();
         calculateBuoyancy();
         calculateDrag();
@@ -212,6 +218,9 @@ public class BoatPhysicsHandler {
 
         boat.moveTo(this.position);
         boat.setRotation(this.rotation);
+
+        this.forces.clear();
+        this.forcePositions.clear();
     }
 
     public void readData(CompoundTag nbt) {

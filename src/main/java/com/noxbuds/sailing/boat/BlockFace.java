@@ -1,14 +1,17 @@
 package com.noxbuds.sailing.boat;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 public class BlockFace {
+    private final BlockPos blockPos;
     private final Vec3 position;
     private final Vec3 normal;
     private final float airDragFactor;
     private final float waterDragFactor;
 
-    public BlockFace(Vec3 position, Vec3 normal, float airDragFactor, float waterDragFactor) {
+    public BlockFace(BlockPos blockPos, Vec3 position, Vec3 normal, float airDragFactor, float waterDragFactor) {
+        this.blockPos = blockPos;
         this.position = position;
         this.normal = normal;
         this.airDragFactor = airDragFactor;
@@ -19,9 +22,14 @@ public class BlockFace {
         return this.position;
     }
 
+    public BlockPos getBlockPos() {
+        return this.blockPos;
+    }
+
     public Vec3 getDrag(Vec3 velocity, Vec3 angularVelocity, boolean isSubmerged) {
         // the linear motion caused by the angular velocity is perpendicular to both the position vector and the
         // angular velocity vector, so it can be found by taking their cross product
+        // TODO: reposition according to rotating component
         Vec3 velocityFromAngular = new Vec3(angularVelocity.toVector3f()).cross(this.position);
         Vec3 totalVelocity = velocityFromAngular.add(velocity);
         Vec3 velocityDirection = totalVelocity.normalize();

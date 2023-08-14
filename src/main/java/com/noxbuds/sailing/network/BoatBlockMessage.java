@@ -1,7 +1,7 @@
 package com.noxbuds.sailing.network;
 
 import com.noxbuds.sailing.boat.BoatBlockContainer;
-import com.noxbuds.sailing.client.BoatBlockPacketHandler;
+import com.noxbuds.sailing.client.network.BoatBlockPacketHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderGetter;
@@ -15,7 +15,6 @@ import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import java.nio.charset.Charset;
 import java.util.Optional;
 import java.util.function.Supplier;
 
